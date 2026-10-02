@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  # ----------------------------------------------------------------------------
+  # NGINX Plus (Requires valid license/image or your existing container)
+  # ----------------------------------------------------------------------------
+  nginx-plus:
+    image: ${NGINX_PLUS_IMAGE:-nginxplus:latest}
+    container_name: nginx-plus
+    restart: unless-stopped
+    ports:
+      - "80:80"             # HTTP Server Zone 11111
+      - "8443:8443"         # HTTPS Secure Server
+      - "8080:8080"         # NGINX Plus Live API & Dashboard
+      - "20053:20053/tcp"   # Stream TCP Zone 20053 (DNS)
+      - "20053:20053/udp"   # Stream UDP Zone 20053 (DNS)
+      - "20080:20080/tcp"   # Stream TCP L4 Proxy
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+  # ----------------------------------------------------------------------------
+  # Official NGINX Prometheus Exporter
+  # ----------------------------------------------------------------------------
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.1
+    container_name: nginx-exporter
+    restart: unless-stopped
+    command:
+      - -nginx.plus
+      - -nginx.scrape-uri=http://nginx-plus:8080/api
+    ports:
+      - "9113:9113"
+    depends_on:
+      - nginx-plus
+
+  # ----------------------------------------------------------------------------
+  # Prometheus Time-Series Database
+  # ----------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - nginx-exporter
+
+  # ----------------------------------------------------------------------------
+  # Grafana Visualization Server
+  # ----------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
